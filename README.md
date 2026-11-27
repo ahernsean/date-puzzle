@@ -26,3 +26,13 @@ pieces cover 47 squares: seven pentominoes (U, Z, N, P, V, T, and the long L) an
 - `solver.js`: board model, piece shapes, and a backtracking exact-cover solver (browser and Node).
 - `tools/analyze.js`: counts every solution for every month/date/weekday combination and writes
   `solution-counts.json`, which the app uses to show how many solutions a day has.
+
+## Is every day solvable?
+
+Yes. `tools/analyze.js` counted every solution for all 2,562 month/date/weekday combinations
+(including Feb 29). Every one is solvable, so the puzzle works in **every year**, not just 2022.
+The board has no year on it.
+
+- Fewest solutions of any combination: Monday, April 6 (97). Most: Tuesday, June 7 (10,374).
+- In 2022, the hardest day is Wednesday, April 27 (113 solutions); the easiest is Tuesday, June 7 (10,374).
+- The median combination has 1,619 solutions.
