@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Calendar Puzzle</title>
+<style>
+  :root {
+    --bg: #efebe3;
+    --ink: #2b2620;
+    --muted: #6d6458;
+    --wood: #dcbd90;
+    --wood-line: #c7a372;
+    --frame: #c69c66;
+    --frame-edge: #a77f4c;
+    --engrave: #6a4523;
+    --target: #fff1bf;
+    --target-ring: #e0621b;
+    --piece: rgba(24, 178, 112, 0.62);
+    --piece-edge: #3fe39b;
+    --btn: #fff;
+    --btn-border: #cfc6b8;
+    --accent: #1f7a52;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  body { padding: 12px 16px 40px; }
+  header { max-width: 1100px; margin: 0 auto 10px; }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: .9rem; margin: 0 0 10px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .controls .group { display: flex; gap: 6px; align-items: center; }
+  button, input[type=date] {
+    font: inherit; font-size: .95rem; padding: 7px 12px; border-radius: 8px;
+    border: 1px solid var(--btn-border); background: var(--btn); color: var(--ink);
+    cursor: pointer; touch-action: manipulation;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .status { max-width: 1100px; margin: 8px auto 0; min-height: 1.5em; font-size: 1rem; }
+  .status b { color: var(--accent); }
+  .status .win { color: #fff; background: var(--accent); padding: 3px 10px; border-radius: 6px; }
+  .tools { max-width: 1100px; margin: 8px auto 0; display: flex; gap: 8px; align-items: center;
+    flex-wrap: wrap; color: var(--muted); font-size: .85rem; }
+  #play { position: relative; max-width: 1100px; margin: 10px auto 0; user-select: none;
+    -webkit-user-select: none; }
+  #board { position: absolute; background: var(--frame); border-radius: 14px;
+    box-shadow: inset 0 0 0 2px var(--frame-edge), 0 6px 18px rgba(0,0,0,.15); }
+  .cell { position: absolute; background: var(--wood); border: 1px solid var(--wood-line);
+    display: flex; align-items: center; justify-content: center; color: var(--engrave);
+    font-weight: 600; }
+  .cell.target { background: var(--target); box-shadow: inset 0 0 0 3px var(--target-ring);
+    color: #9a3a05; font-weight: 800; z-index: 1; }
+  #tray-label { position: absolute; color: var(--muted); font-size: .85rem; }
+  .piece { position: absolute; touch-action: none; cursor: grab; z-index: 10;
+    filter: drop-shadow(0 4px 6px rgba(0,0,0,.28)); }
+  .piece.placed { filter: none; }
+  .piece.dragging { cursor: grabbing; z-index: 1000 !important;
+    filter: drop-shadow(0 10px 14px rgba(0,0,0,.35)); }
+  .piece.anim { transition: left .55s cubic-bezier(.3,.7,.3,1), top .55s cubic-bezier(.3,.7,.3,1); }
+  .piece .sq { position: absolute; background: var(--piece); border: 0 solid var(--piece-edge); }
+  .piece.selected .sq { border-color: #ffd23f; }
+  .help { max-width: 1100px; margin: 14px auto 0; color: var(--muted); font-size: .85rem; line-height: 1.5; }
+  .help kbd { border: 1px solid var(--btn-border); border-bottom-width: 2px; border-radius: 4px;
+    padding: 0 5px; background: #fff; font-size: .8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Calendar Puzzle</h1>
+  <p class="sub">Cover every square except the month, date, and day of the week.</p>
+  <div class="controls">
+    <div class="group">
+      <button id="prev" aria-label="Previous day">&#9664;</button>
+      <input type="date" id="date" min="2022-01-01" max="2022-12-31" aria-label="Date">
+      <button id="next" aria-label="Next day">&#9654;</button>
+      <button id="today">Today</button>
+    </div>
+    <div class="group">
+      <button id="solve" class="primary">Solve</button>
+      <button id="clear">Clear</button>
+    </div>
+  </div>
+</header>
+<div class="status" id="status"></div>
+<div class="tools">
+  <span>Selected piece:</span>
+  <button id="rot" disabled>&#8635; Rotate</button>
+  <button id="flip" disabled>&#8646; Flip</button>
+</div>
+<div id="play"><div id="board"></div><div id="tray-label">Pieces</div></div>
+<div class="help">
+  Drag pieces onto the board; they snap into place when they fit. Tap a piece to select it, then use
+  Rotate / Flip. Shortcuts: double-tap or right-click to rotate, <kbd>R</kbd> rotate, <kbd>F</kbd> flip
+  (these also work while dragging). Drop a piece back off the board to remove it.
+</div>
+<script src="solver.js"></script>
+<script>
+(() => {
+  const P = window.Puzzle;
+  const FULL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const FULL_DAYS = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const YEAR = 2022;
+  const $ = id => document.getElementById(id);
+  const play = $('play'), boardEl = $('board'), statusEl = $('status');
+
+  let counts = null;
+  fetch('solution-counts.json').then(r => r.ok ? r.json() : null).then(j => { counts = j; renderStatus(); }).catch(() => {});
+
+  // ---- geometry helpers ----
+  const flipC = cells => cells.map(([r, c]) => [r, -c]);
+  const rotC = cells => cells.map(([r, c]) => [c, -r]);
+  function shapeOf(base, f, rot) {
+    let s = f ? flipC(base) : base.slice();
+    for (let i = 0; i < rot; i++) s = rotC(s);
+    return P.normalize(s);
+  }
+  const dims = cells => [Math.max(...cells.map(c => c[0])) + 1, Math.max(...cells.map(c => c[1])) + 1];
+
+  // ---- state ----
+  let S = 56, bx = 0, by = 0, boardW = 0, boardH = 0, PAD = 10;
+  let targets = new Set();
+  let selected = null, busy = false, z = 20;
+  const pieces = P.PIECES.map((p, i) => ({
+    i, id: p.id, base: p.cells, f: 0, rot: 0, placed: null, x: 0, y: 0, home: { cx: 0, cy: 0 }, el: null,
+  }));
+  // Resting orientation in the tray: lying flat (wider than tall) to save space.
+  for (const pc of pieces) {
+    pc.homeRot = [0, 1, 2, 3].find(r => { const [h, w] = dims(shapeOf(pc.base, 0, r)); return w >= h; });
+    pc.rot = pc.homeRot;
+  }
+  const cellsOf = pc => shapeOf(pc.base, pc.f, pc.rot);
+
+  // ---- date ----
+  const dateInput = $('date');
+  function setDate(d) {
+    const y = d.getUTCFullYear(), m = d.getUTCMonth(), day = d.getUTCDate();
+    dateInput.value = `${y}-${String(m + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    applyDate();
+  }
+  function curDate() {
+    const [y, m, d] = dateInput.value.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d));
+  }
+  function applyDate() {
+    if (!dateInput.value) return;
+    const d = curDate();
+    targets = new Set(P.cellsFor(d.getUTCMonth(), d.getUTCDate(), d.getUTCDay()));
+    clearAll(false);
+    renderBoard();
+    renderStatus();
+  }
+  function shift(n) {
+    const d = curDate(); d.setUTCDate(d.getUTCDate() + n);
+    if (d.getUTCFullYear() !== YEAR) d.setUTCFullYear(YEAR, n > 0 ? 0 : 11, n > 0 ? 1 : 31);
+    setDate(d);
+  }
+  dateInput.addEventListener('change', applyDate);
+  $('prev').onclick = () => shift(-1);
+  $('next').onclick = () => shift(1);
+  $('today').onclick = () => { const t = new Date(); setDate(new Date(Date.UTC(YEAR, t.getMonth(), t.getDate()))); };
+
+  function renderStatus(msg) {
+    if (!dateInput.value) return;
+    const d = curDate();
+    const label = `${FULL_DAYS[d.getUTCDay()]}, ${FULL_MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+    const key = `${P.MONTHS[d.getUTCMonth()]} ${d.getUTCDate()} ${P.DAYS[d.getUTCDay()]}`;
+    const cnt = counts && counts[key] != null ? ` &middot; <b>${counts[key].toLocaleString()}</b> different solutions exist` : '';
+    statusEl.innerHTML = msg ? `${label} &middot; ${msg}` : `${label}${cnt}`;
+  }
+
+  // ---- layout ----
+  function layout() {
+    const W = play.clientWidth;
+    const wide = W >= 760;
+    if (wide) S = Math.max(40, Math.min(64, Math.floor((W - 2 * PAD - 24) / (7 + 11.5))));
+    else S = Math.max(34, Math.min(58, Math.floor((W - 2 * PAD) / 7)));
+    boardW = 7 * S + 2 * PAD; boardH = 8 * S + 2 * PAD;
+    bx = PAD; by = PAD;
+    Object.assign(boardEl.style, { left: '0px', top: '0px', width: boardW + 'px', height: boardH + 'px' });
+
+    // Tray region: right of board (wide) or below (narrow). Shelf-pack piece slots.
+    const tx = wide ? boardW + 24 : 0, ty = wide ? 0 : boardH + 34;
+    const tw = wide ? W - tx : W;
+    const label = $('tray-label');
+    label.style.left = tx + 'px'; label.style.top = (wide ? -20 : boardH + 8) + 'px';
+    const gap = 0.4 * S;
+    let x = 0, y = 0, shelfH = 0;
+    const homeDims = pc => dims(shapeOf(pc.base, 0, pc.homeRot));
+    const order = pieces.slice().sort((a, b) => homeDims(b)[0] - homeDims(a)[0] || homeDims(b)[1] - homeDims(a)[1]);
+    for (const pc of order) {
+      const [h, w] = homeDims(pc);
+      const pw = w * S, ph = h * S;
+      if (x > 0 && x + pw > tw) { x = 0; y += shelfH + gap; shelfH = 0; }
+      pc.home = { cx: tx + x + pw / 2, cy: ty + y + ph / 2 };
+      x += pw + gap; shelfH = Math.max(shelfH, ph);
+    }
+    const trayBottom = ty + y + shelfH + S / 2;
+    play.style.height = Math.max(boardH, trayBottom) + 'px';
+    renderBoard();
+    for (const pc of pieces) {
+      renderPiece(pc);
+      if (pc.placed) placeAt(pc, pc.placed.r, pc.placed.c); else sendHome(pc, false);
+    }
+  }
+
+  function renderBoard() {
+    boardEl.innerHTML = '';
+    const fs = Math.max(11, Math.round(S * 0.3));
+    P.CELLS.forEach(([r, c], i) => {
+      const el = document.createElement('div');
+      el.className = 'cell' + (targets.has(i) ? ' target' : '');
+      Object.assign(el.style, { left: (PAD + c * S) + 'px', top: (PAD + r * S) + 'px',
+        width: S + 'px', height: S + 'px', fontSize: fs + 'px' });
+      el.textContent = P.LABELS[r][c];
+      boardEl.appendChild(el);
+    });
+  }
+
+  // ---- pieces ----
+  function renderPiece(pc) {
+    if (!pc.el) {
+      pc.el = document.createElement('div');
+      pc.el.className = 'piece';
+      play.appendChild(pc.el);
+      attachDrag(pc);
+    }
+    const cells = cellsOf(pc), set = new Set(cells.map(([r, c]) => r + ',' + c));
+    const [h, w] = dims(cells);
+    pc.el.style.width = w * S + 'px'; pc.el.style.height = h * S + 'px';
+    pc.el.innerHTML = '';
+    const bw = Math.max(2, Math.round(S / 22));
+    for (const [r, c] of cells) {
+      const sq = document.createElement('div');
+      sq.className = 'sq';
+      const has = (dr, dc) => set.has((r + dr) + ',' + (c + dc));
+      // Outline only the outer edges so each piece reads as one solid shape.
+      Object.assign(sq.style, { left: c * S + 'px', top: r * S + 'px', width: S + 'px', height: S + 'px',
+        borderTopWidth: has(-1, 0) ? 0 : bw + 'px', borderBottomWidth: has(1, 0) ? 0 : bw + 'px',
+        borderLeftWidth: has(0, -1) ? 0 : bw + 'px', borderRightWidth: has(0, 1) ? 0 : bw + 'px' });
+      pc.el.appendChild(sq);
+    }
+  }
+  function moveTo(pc, x, y) { pc.x = x; pc.y = y; pc.el.style.left = x + 'px'; pc.el.style.top = y + 'px'; }
+  function sendHome(pc, animate = true) {
+    pc.placed = null; pc.el.classList.remove('placed');
+    const [h, w] = dims(cellsOf(pc));
+    pc.el.classList.toggle('anim', animate);
+    moveTo(pc, pc.home.cx - w * S / 2, pc.home.cy - h * S / 2);
+  }
+  function placeAt(pc, r, c) {
+    pc.placed = { r, c }; pc.el.classList.add('placed');
+    moveTo(pc, bx + c * S, by + r * S);
+  }
+  // Board cells a piece would cover if its top-left were at (r,c); null if invalid.
+  function coverage(pc, r, c, ignoreSelf = true) {
+    const occupied = new Set();
+    for (const o of pieces) if (o.placed && !(ignoreSelf && o === pc))
+      for (const [dr, dc] of cellsOf(o)) occupied.add(P.INDEX[(o.placed.r + dr) + ',' + (o.placed.c + dc)]);
+    const out = [];
+    for (const [dr, dc] of cellsOf(pc)) {
+      const i = P.INDEX[(r + dr) + ',' + (c + dc)];
+      if (i === undefined || targets.has(i) || occupied.has(i)) return null;
+      out.push(i);
+    }
+    return out;
+  }
+  function overlapsBoard(pc) {
+    const [h, w] = dims(cellsOf(pc));
+    return pc.x < boardW && pc.x + w * S > 0 && pc.y < boardH && pc.y + h * S > 0;
+  }
+  function trySnap(pc) {
+    const r = Math.round((pc.y - by) / S), c = Math.round((pc.x - bx) / S);
+    if (coverage(pc, r, c)) { pc.el.classList.add('anim'); placeAt(pc, r, c); return true; }
+    return false;
+  }
+  function dropLogic(pc) {
+    if (trySnap(pc)) { checkWin(); return; }
+    if (overlapsBoard(pc)) sendHome(pc);
+    else { pc.placed = null; pc.el.classList.remove('placed'); }
+    checkWin();
+  }
+
+  function select(pc) {
+    if (selected) selected.el.classList.remove('selected');
+    selected = pc;
+    if (pc) pc.el.classList.add('selected');
+    $('rot').disabled = $('flip').disabled = !pc || busy;
+  }
+
+  // Rotate/flip around the piece's visual center; re-snap if possible.
+  function transform(pc, kind) {
+    if (!pc || busy) return;
+    const [h0, w0] = dims(cellsOf(pc));
+    const cx = pc.x + w0 * S / 2, cy = pc.y + h0 * S / 2;
+    const wasPlaced = !!pc.placed;
+    if (kind === 'rot') pc.rot = (pc.rot + 1) % 4;
+    else { pc.f = 1 - pc.f; pc.rot = (4 - pc.rot) % 4; } // mirror in place, keeping the visual rotation
+    renderPiece(pc);
+    const [h, w] = dims(cellsOf(pc));
+    pc.el.classList.remove('anim');
+    moveTo(pc, cx - w * S / 2, cy - h * S / 2);
+    if (wasPlaced) {
+      pc.placed = null; pc.el.classList.remove('placed');
+      if (!pc.el.classList.contains('dragging') && !trySnap(pc)) pc.el.classList.remove('placed');
+    }
+    checkWin();
+  }
+  $('rot').onclick = () => transform(selected, 'rot');
+  $('flip').onclick = () => transform(selected, 'flip');
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT') return;
+    const k = e.key.toLowerCase();
+    if (k === 'r') transform(selected, 'rot');
+    else if (k === 'f') transform(selected, 'flip');
+  });
+
+  function attachDrag(pc) {
+    let start = null, lastTap = 0;
+    pc.el.addEventListener('contextmenu', e => { e.preventDefault(); select(pc); transform(pc, 'rot'); });
+    pc.el.addEventListener('pointerdown', e => {
+      if (busy || e.button === 2) return;
+      e.preventDefault();
+      if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+      pc.el.setPointerCapture(e.pointerId);
+      const rect = play.getBoundingClientRect();
+      start = { px: e.clientX, py: e.clientY, ox: e.clientX - rect.left - pc.x, oy: e.clientY - rect.top - pc.y, moved: false, wasPlaced: pc.placed };
+      pc.el.classList.remove('anim');
+      pc.el.style.zIndex = ++z;
+      select(pc);
+    });
+    pc.el.addEventListener('pointermove', e => {
+      if (!start) return;
+      if (!start.moved && Math.hypot(e.clientX - start.px, e.clientY - start.py) < 5) return;
+      if (!start.moved) { start.moved = true; pc.el.classList.add('dragging'); pc.placed = null; pc.el.classList.remove('placed'); }
+      const rect = play.getBoundingClientRect();
+      const [h, w] = dims(cellsOf(pc));
+      // Keep the grab point under the finger, clamped to the play area.
+      let x = e.clientX - rect.left - start.ox, y = e.clientY - rect.top - start.oy;
+      x = Math.min(Math.max(x, -w * S / 2), play.clientWidth - w * S / 2);
+      y = Math.min(Math.max(y, -h * S / 2), play.clientHeight - h * S / 2);
+      moveTo(pc, x, y);
+      // If R/F was pressed mid-drag, the shape changed; re-anchor the grab offset.
+      start.ox = e.clientX - rect.left - pc.x; start.oy = e.clientY - rect.top - pc.y;
+    });
+    const end = e => {
+      if (!start) return;
+      const s = start; start = null;
+      pc.el.classList.remove('dragging');
+      if (!s.moved) {
+        const now = Date.now();
+        if (now - lastTap < 320) transform(pc, 'rot');
+        lastTap = now;
+        return;
+      }
+      dropLogic(pc);
+    };
+    pc.el.addEventListener('pointerup', end);
+    pc.el.addEventListener('pointercancel', end);
+  }
+
+  function checkWin() {
+    const covered = new Set();
+    for (const pc of pieces) if (pc.placed)
+      for (const [dr, dc] of cellsOf(pc)) covered.add(P.INDEX[(pc.placed.r + dr) + ',' + (pc.placed.c + dc)]);
+    if (!busy && covered.size === P.CELLS.length - 3) renderStatus('<span class="win">Solved! Nice work.</span>');
+    else if (!busy) renderStatus();
+  }
+
+  function clearAll(animate = true) {
+    select(null);
+    for (const pc of pieces) {
+      pc.f = 0; pc.rot = pc.homeRot;
+      if (pc.el) { renderPiece(pc); sendHome(pc, animate); }
+    }
+  }
+  $('clear').onclick = () => { if (busy) return; clearAll(); renderStatus(); };
+
+  // ---- solve + animate ----
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  $('solve').onclick = async () => {
+    if (busy) return;
+    busy = true; select(null);
+    ['solve', 'clear', 'prev', 'next', 'today'].forEach(id => $(id).disabled = true);
+    dateInput.disabled = true;
+    renderStatus('solving…');
+    clearAll(true);
+    await wait(650);
+    const t0 = performance.now();
+    const { solution } = P.solve([...targets]);
+    const ms = Math.round(performance.now() - t0);
+    if (!solution) {
+      renderStatus('no solution exists for this day.');
+    } else {
+      renderStatus(`found a solution in ${ms} ms…`);
+      for (const pl of solution) {
+        const pc = pieces[pl.piece];
+        pc.f = pl.orient.flip; pc.rot = pl.orient.rot;
+        renderPiece(pc); sendHome(pc, false);
+        pc.el.style.zIndex = ++z;
+        await wait(60);
+        pc.el.classList.add('anim');
+        placeAt(pc, pl.row, pl.col);
+        await wait(520);
+      }
+      renderStatus('<span class="win">Solved by the computer.</span> Press Clear to try it yourself.');
+    }
+    busy = false;
+    ['solve', 'clear', 'prev', 'next', 'today'].forEach(id => $(id).disabled = false);
+    dateInput.disabled = false;
+  };
+
+  // ---- init ----
+  window.addEventListener('resize', () => { if (!busy) layout(); });
+  const t = new Date();
+  dateInput.value = `${YEAR}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  if (t.getMonth() === 1 && t.getDate() === 29) dateInput.value = `${YEAR}-02-28`;
+  const d0 = curDate();
+  targets = new Set(P.cellsFor(d0.getUTCMonth(), d0.getUTCDate(), d0.getUTCDay()));
+  layout();
+  renderStatus();
+})();
+</script>
+</body>
+</html>
